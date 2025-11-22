@@ -6,8 +6,8 @@
  * Hoja índice:    "Index" (oculta; evita duplicados con MessageId)
  *
  * Columnas "Correo" (cabeceras en español):
- * De | Para | Cc | Cco | Asunto | Resumen | URLsCuerpo | Fecha | Direccion | Carpeta |
- * NoLeido | Etiquetas | TextoPlano | HtmlBody | URLs | Adjuntos | ThreadId | MessageId
+ * DeNombre | DeCorreo | Para | Cc | Cco | Asunto | Mensaje | URL's | Fecha | Direccion | Carpeta |
+ * Leido | Etiquetas | TextoPlano | HtmlBody | URLs | Adjuntos | ThreadId | MessageId
  ************************************************************/
 
 /**********************
@@ -109,7 +109,7 @@ function backfillAll() {
         const ts       = Number(m.internalDate || 0);
         const payload  = m.payload || {};
         const headers  = headersToObject_(payload.headers || []);
-        const from     = headers['From']    || '';
+        const fromRaw  = headers['From']    || '';
         const to       = headers['To']      || '';
         const cc       = headers['Cc']      || '';
         const bcc      = headers['Bcc']     || '';
@@ -117,9 +117,11 @@ function backfillAll() {
         const labels   = m.labelIds || [];
         const dateObj  = ts ? new Date(ts) : new Date();
 
-        const direction = from.indexOf(me) !== -1 ? 'Sent' : 'Received';
+        const fromParts = parseEmailAddress_(fromRaw);
+        const direction = (fromParts.email || fromRaw).indexOf(me) !== -1 ? 'Enviado' : 'Recibido';
         const folder    = folderFromLabels_(labels);
         const unread    = labels.includes('UNREAD');
+        const unreadStr = unread ? 'Sin Leer' : 'Leido';
 
         const bodies = getBodies_(m.id, payload);
         const htmlBody  = truncate_(bodies.html || '', MAX_CELL);
@@ -131,8 +133,8 @@ function backfillAll() {
         const attsMeta  = JSON.stringify(extractAttachmentsMeta_(payload));
 
         rows.push([
-          from, to, cc, bcc, subject, snippet, bodyUrls, dateObj,
-          direction, folder, unread, labels.join(','),
+          fromParts.name, fromParts.email, to, cc, bcc, subject, snippet, bodyUrls, dateObj,
+          direction, folder, unreadStr, labels.join(','),
           plainBody, htmlBody, bodyUrls, attsMeta,
           m.threadId, m.id
         ]);
@@ -266,7 +268,7 @@ function fullRescanAll() {
       const ts       = Number(m.internalDate || 0);
       const payload  = m.payload || {};
       const headers  = headersToObject_(payload.headers || []);
-      const from     = headers['From']    || '';
+      const fromRaw  = headers['From']    || '';
       const to       = headers['To']      || '';
       const cc       = headers['Cc']      || '';
       const bcc      = headers['Bcc']     || '';
@@ -274,9 +276,11 @@ function fullRescanAll() {
       const labels   = m.labelIds || [];
       const dateObj  = ts ? new Date(ts) : new Date();
 
-      const direction = from.indexOf(me) !== -1 ? 'Sent' : 'Received';
+      const fromParts = parseEmailAddress_(fromRaw);
+      const direction = (fromParts.email || fromRaw).indexOf(me) !== -1 ? 'Enviado' : 'Recibido';
       const folder    = folderFromLabels_(labels);
       const unread    = labels.includes('UNREAD');
+      const unreadStr = unread ? 'Sin Leer' : 'Leido';
 
       const bodies = getBodies_(m.id, payload);
       const htmlBody  = truncate_(bodies.html || '', MAX_CELL);
@@ -289,8 +293,8 @@ function fullRescanAll() {
       const attsMeta  = JSON.stringify(extractAttachmentsMeta_(payload));
 
       rows.push([
-        from, to, cc, bcc, subject, snippet, bodyUrls, dateObj,
-        direction, folder, unread, labels.join(','),
+        fromParts.name, fromParts.email, to, cc, bcc, subject, snippet, bodyUrls, dateObj,
+        direction, folder, unreadStr, labels.join(','),
         plainBody, htmlBody, bodyUrls, attsMeta,
         m.threadId, m.id
       ]);
@@ -359,7 +363,7 @@ function fetchDetailsAndMapRows_(ids, rowsOut, index, toIndex, state, incrementa
 
     const payload  = m.payload || {};
     const headers  = headersToObject_(payload.headers || []);
-    const from     = headers['From']    || '';
+    const fromRaw  = headers['From']    || '';
     const to       = headers['To']      || '';
     const cc       = headers['Cc']      || '';
     const bcc      = headers['Bcc']     || '';
@@ -367,9 +371,11 @@ function fetchDetailsAndMapRows_(ids, rowsOut, index, toIndex, state, incrementa
     const labels   = m.labelIds || [];
     const dateObj  = ts ? new Date(ts) : new Date();
 
-    const direction = from.indexOf(me) !== -1 ? 'Sent' : 'Received';
+    const fromParts = parseEmailAddress_(fromRaw);
+    const direction = (fromParts.email || fromRaw).indexOf(me) !== -1 ? 'Enviado' : 'Recibido';
     const folder    = folderFromLabels_(labels);
     const unread    = labels.includes('UNREAD');
+    const unreadStr = unread ? 'Sin Leer' : 'Leido';
 
     const bodies = getBodies_(m.id, payload);
     const htmlBody  = truncate_(bodies.html || '', MAX_CELL);
@@ -382,8 +388,8 @@ function fetchDetailsAndMapRows_(ids, rowsOut, index, toIndex, state, incrementa
     const attsMeta  = JSON.stringify(extractAttachmentsMeta_(payload));
 
     rows.push([
-      from, to, cc, bcc, subject, snippet, bodyUrls, dateObj,
-      direction, folder, unread, labels.join(','),
+      fromParts.name, fromParts.email, to, cc, bcc, subject, snippet, bodyUrls, dateObj,
+      direction, folder, unreadStr, labels.join(','),
       plainBody, htmlBody, bodyUrls, attsMeta,
       m.threadId, m.id
     ]);
@@ -470,6 +476,21 @@ function extractAttachmentsMeta_(payload) {
     if (p.parts && p.parts.length) p.parts.forEach(walk);
   })(payload);
   return out;
+}
+
+// Devuelve {name, email} a partir de un string tipo 'Nombre <correo@dominio>'
+function parseEmailAddress_(raw) {
+  if (!raw) return { name: '', email: '' };
+  const first = String(raw).split(',')[0].trim(); // toma solo el primer remitente si hay varios
+  const m = first.match(/^(.*)<([^>]+)>$/);
+  if (m) {
+    const name = m[1].trim().replace(/^"|"$/g, '');
+    const email = m[2].trim();
+    return { name: name || email, email };
+  }
+  // si solo viene el correo o texto plano sin <>
+  const emailLike = first.includes('@') ? first : '';
+  return { name: first, email: emailLike || first };
 }
 
 function decodeB64Url_(data) {
@@ -607,8 +628,8 @@ function ensureSheets_() {
 function ensureHeaderAndFilter_() {
   const sh = getSS_().getSheetByName(SHEET_NAME);
   const headers = [
-    'De','Para','Cc','Cco','Asunto','Resumen','URLsCuerpo','Fecha',
-    'Direccion','Carpeta','NoLeido','Etiquetas',
+    'DeNombre','DeCorreo','Para','Cc','Cco','Asunto','Mensaje',"URL's",'Fecha',
+    'Direccion','Carpeta','Leido','Etiquetas',
     'TextoPlano','HtmlBody','URLs','Adjuntos','ThreadId','MessageId'
   ];
   sh.getRange(1,1,1,headers.length).setValues([headers]);
